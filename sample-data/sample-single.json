@@ -1,0 +1,22 @@
+{
+  "id": "batch-001",
+  "type": "batch",
+  "timestamp": "2024-12-18T11:00:00Z",
+  "total_amount": 3840.49,
+  "record_count": 3,
+  "records": [
+    {
+      "id": "txn-004",
+      "type": "transaction",
+      "amount": 1500.00,
+      "merchant": "Retail Chain A"
+    },
+    {
+      "id": "txn-005",
+      "type": "transaction",
+      "amount": 2340.49,
+      "merchant": "Retail Chain B"
+    }
+  ]
+}
+

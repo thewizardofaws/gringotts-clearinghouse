@@ -1,0 +1,42 @@
+[
+  {
+    "id": "txn-001",
+    "type": "transaction",
+    "timestamp": "2024-12-18T10:30:00Z",
+    "amount": 1250.50,
+    "currency": "USD",
+    "merchant": "Acme Corp",
+    "status": "completed",
+    "metadata": {
+      "payment_method": "credit_card",
+      "card_last4": "1234"
+    }
+  },
+  {
+    "id": "txn-002",
+    "type": "transaction",
+    "timestamp": "2024-12-18T10:35:00Z",
+    "amount": 89.99,
+    "currency": "USD",
+    "merchant": "TechStore Inc",
+    "status": "pending",
+    "metadata": {
+      "payment_method": "debit_card",
+      "card_last4": "5678"
+    }
+  },
+  {
+    "id": "txn-003",
+    "type": "transaction",
+    "timestamp": "2024-12-18T10:40:00Z",
+    "amount": 2500.00,
+    "currency": "USD",
+    "merchant": "Global Services",
+    "status": "completed",
+    "metadata": {
+      "payment_method": "wire_transfer",
+      "reference": "WIRE-2024-001"
+    }
+  }
+]
+
