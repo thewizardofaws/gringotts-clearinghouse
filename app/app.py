@@ -158,32 +158,55 @@ def update_file_processing_status(
 
 def process_json_file(s3_key: str, content: bytes) -> list[Dict[str, Any]]:
     """
-    Parse JSON file and extract records
-    Handles both single JSON objects and arrays of objects
+    Parse JSON file and extract records for database ingestion.
+    Handles multiple JSON structures: arrays, single objects, and nested data containers.
+    
+    Args:
+        s3_key: S3 object key for logging purposes
+        content: Raw file content as bytes
+        
+    Returns:
+        List of record dictionaries to be inserted into processed_data table
+        
+    Raises:
+        ValueError: If JSON is malformed, empty, or has unexpected structure
     """
+    if not content or len(content) == 0:
+        raise ValueError(f"Empty file: {s3_key}")
+    
     try:
-        data = json.loads(content.decode('utf-8'))
+        decoded_content = content.decode('utf-8').strip()
+        if not decoded_content:
+            raise ValueError(f"File contains only whitespace: {s3_key}")
+        
+        data = json.loads(decoded_content)
         
         # Handle different JSON structures
         if isinstance(data, list):
-            # Array of objects
+            if len(data) == 0:
+                raise ValueError(f"Empty array in {s3_key}")
             records = data
         elif isinstance(data, dict):
             # Single object or object with nested data
-            if 'records' in data:
+            if 'records' in data and isinstance(data['records'], list):
                 records = data['records']
-            elif 'data' in data:
+            elif 'data' in data and isinstance(data['data'], list):
                 records = data['data']
             else:
-                # Single object - wrap in list
+                # Single object - wrap in list for consistent processing
                 records = [data]
         else:
-            raise ValueError(f"Unexpected JSON structure: {type(data)}")
+            raise ValueError(f"Unexpected JSON structure in {s3_key}: expected object or array, got {type(data).__name__}")
+        
+        if not records:
+            raise ValueError(f"No records extracted from {s3_key}")
         
         logger.info(f"Parsed {len(records)} records from {s3_key}")
         return records
     except json.JSONDecodeError as e:
-        raise ValueError(f"Invalid JSON in {s3_key}: {str(e)}")
+        raise ValueError(f"Invalid JSON syntax in {s3_key}: {str(e)}")
+    except UnicodeDecodeError as e:
+        raise ValueError(f"Invalid UTF-8 encoding in {s3_key}: {str(e)}")
     except Exception as e:
         raise ValueError(f"Error parsing {s3_key}: {str(e)}")
 
@@ -349,8 +372,39 @@ def ready():
         return jsonify({'status': 'not ready', 'error': str(e)}), 503
 
 
+def verify_database_schema(conn):
+    """
+    Pre-flight check: Verify required database tables exist before processing
+    Returns True if schema is valid, False otherwise
+    """
+    required_tables = ['file_processing_log', 'processed_data']
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT table_name 
+                FROM information_schema.tables 
+                WHERE table_schema = 'public' 
+                AND table_name = ANY(%s)
+            """, (required_tables,))
+            existing_tables = {row[0] for row in cur.fetchall()}
+            
+            missing_tables = set(required_tables) - existing_tables
+            if missing_tables:
+                logger.error(f"Missing required database tables: {', '.join(missing_tables)}")
+                return False
+            
+            logger.info("Database schema verification passed")
+            return True
+    except Exception as e:
+        logger.error(f"Database schema verification failed: {str(e)}")
+        return False
+
+
 def main():
-    """Main entry point"""
+    """
+    Main entry point for the Data Clearinghouse application.
+    Validates configuration, performs pre-flight checks, and starts the S3 monitoring loop.
+    """
     # Validate required environment variables
     required_vars = ['DB_HOST', 'DB_USER', 'DB_PASSWORD', 'S3_BUCKET']
     missing = [var for var in required_vars if not os.getenv(var)]
@@ -359,9 +413,21 @@ def main():
         logger.error(f"Missing required environment variables: {', '.join(missing)}")
         raise ValueError(f"Missing required environment variables: {', '.join(missing)}")
     
-    logger.info("Starting Data Clearinghouse Application")
+    logger.info("Initializing Data Clearinghouse Application")
     logger.info(f"Database: {DB_HOST}:{DB_PORT}/{DB_NAME}")
     logger.info(f"S3 Bucket: s3://{S3_BUCKET}")
+    logger.info(f"Poll Interval: {POLL_INTERVAL} seconds")
+    
+    # Pre-flight check: Verify database schema
+    logger.info("Performing pre-flight database schema verification...")
+    try:
+        conn = get_db_connection()
+        if not verify_database_schema(conn):
+            raise RuntimeError("Database schema verification failed. Ensure schema initialization job has completed.")
+        conn.close()
+    except Exception as e:
+        logger.error(f"Pre-flight check failed: {str(e)}")
+        raise
     
     # Start Flask app in a separate thread for health checks
     import threading
@@ -370,6 +436,7 @@ def main():
         daemon=True
     )
     flask_thread.start()
+    logger.info("Health check server started on port 8080")
     
     # Start S3 watcher in main thread
     watch_s3_bucket()

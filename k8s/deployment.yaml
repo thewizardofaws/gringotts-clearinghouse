@@ -16,10 +16,25 @@ spec:
         app: clearinghouse-app
     spec:
       serviceAccountName: clearinghouse-app
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: false
+        capabilities:
+          drop:
+            - ALL
       containers:
       - name: clearinghouse-app
         image: 641332413762.dkr.ecr.us-west-2.amazonaws.com/gringotts-clearinghouse-dev-app:latest
         imagePullPolicy: Always
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false
+          capabilities:
+            drop:
+              - ALL
         ports:
         - containerPort: 8080
           name: http
