@@ -1,0 +1,94 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: clearinghouse-schema-init
+  namespace: default
+spec:
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+      - name: schema-init
+        image: postgres:15-alpine
+        command:
+        - /bin/sh
+        - -c
+        - |
+          set -e
+          echo "Initializing database schema..."
+          
+          PGPASSWORD="${DB_PASSWORD}" psql -h "${DB_HOST}" -U "${DB_USER}" -d "${DB_NAME}" <<EOF
+          -- Create file processing tracking table
+          CREATE TABLE IF NOT EXISTS file_processing_log (
+              id SERIAL PRIMARY KEY,
+              file_name VARCHAR(255) NOT NULL,
+              file_path VARCHAR(512) NOT NULL,
+              s3_bucket VARCHAR(255) NOT NULL,
+              s3_key VARCHAR(512) NOT NULL,
+              file_size BIGINT,
+              file_hash VARCHAR(64),
+              status VARCHAR(50) NOT NULL DEFAULT 'pending',
+              processed_at TIMESTAMP,
+              created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+              updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+              error_message TEXT,
+              metadata JSONB,
+              UNIQUE(s3_bucket, s3_key)
+          );
+          
+          -- Create index on status for faster queries
+          CREATE INDEX IF NOT EXISTS idx_file_processing_log_status ON file_processing_log(status);
+          CREATE INDEX IF NOT EXISTS idx_file_processing_log_created_at ON file_processing_log(created_at);
+          CREATE INDEX IF NOT EXISTS idx_file_processing_log_s3_key ON file_processing_log(s3_key);
+          
+          -- Create processed data table (example structure)
+          CREATE TABLE IF NOT EXISTS processed_data (
+              id SERIAL PRIMARY KEY,
+              file_log_id INTEGER REFERENCES file_processing_log(id),
+              record_type VARCHAR(100),
+              record_data JSONB,
+              created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          );
+          
+          CREATE INDEX IF NOT EXISTS idx_processed_data_file_log_id ON processed_data(file_log_id);
+          CREATE INDEX IF NOT EXISTS idx_processed_data_record_type ON processed_data(record_type);
+          
+          -- Create function to update updated_at timestamp
+          CREATE OR REPLACE FUNCTION update_updated_at_column()
+          RETURNS TRIGGER AS \$\$
+          BEGIN
+              NEW.updated_at = CURRENT_TIMESTAMP;
+              RETURN NEW;
+          END;
+          \$\$ language 'plpgsql';
+          
+          -- Create trigger to auto-update updated_at
+          DROP TRIGGER IF EXISTS update_file_processing_log_updated_at ON file_processing_log;
+          CREATE TRIGGER update_file_processing_log_updated_at
+              BEFORE UPDATE ON file_processing_log
+              FOR EACH ROW
+              EXECUTE FUNCTION update_updated_at_column();
+          
+          -- Grant permissions to app user
+          GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO "${DB_USER}";
+          GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO "${DB_USER}";
+          
+          SELECT 'Schema initialization completed successfully!' AS result;
+          EOF
+          
+          echo "Schema initialization completed!"
+        env:
+        - name: DB_HOST
+          value: "gringotts-clearinghouse-dev-postgres.ctiuycckkj5b.us-west-2.rds.amazonaws.com"
+        - name: DB_PORT
+          value: "5432"
+        - name: DB_NAME
+          value: "clearinghouse"
+        - name: DB_USER
+          value: "appuser"
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: clearinghouse-db-secret
+              key: password
+

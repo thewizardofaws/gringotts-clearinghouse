@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: clearinghouse-app
+  namespace: default
+  labels:
+    app: clearinghouse-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: clearinghouse-app
+  template:
+    metadata:
+      labels:
+        app: clearinghouse-app
+    spec:
+      serviceAccountName: clearinghouse-app
+      containers:
+      - name: clearinghouse-app
+        image: 641332413762.dkr.ecr.us-west-2.amazonaws.com/gringotts-clearinghouse-dev-app:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+          name: http
+          protocol: TCP
+        env:
+        - name: DB_HOST
+          value: "gringotts-clearinghouse-dev-postgres.ctiuycckkj5b.us-west-2.rds.amazonaws.com"
+        - name: DB_PORT
+          value: "5432"
+        - name: DB_NAME
+          value: "clearinghouse"
+        - name: DB_USER
+          value: "appuser"
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: clearinghouse-db-secret
+              key: password
+        - name: S3_BUCKET
+          value: "gringotts-clearinghouse-dev-raw-641332413762"
+        - name: AWS_REGION
+          value: "us-west-2"
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 5
+
