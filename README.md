@@ -369,6 +369,11 @@ gringotts-clearinghouse/
 │   ├── app.py                   # Main application logic
 │   └── requirements.txt         # Python dependencies
 ├── infrastructure/              # Terraform infrastructure definitions
+│   ├── modules/
+│   │   └── guardrails/          # Agent guardrails module
+│   │       ├── main.tf          # IAM roles and SNS topics
+│   │       ├── variables.tf     # Module variables
+│   │       └── outputs.tf       # Module outputs
 │   └── us-west-2/
 │       └── dev/                 # Development environment
 │           ├── ecr.tf           # ECR repository configuration
@@ -385,6 +390,9 @@ gringotts-clearinghouse/
 │   ├── schema-init-job.yaml    # Database schema initialization
 │   ├── service-account.yaml    # IRSA service account
 │   └── service.yaml            # Kubernetes service
+├── validation/                  # Agent output validation
+│   ├── __init__.py             # Module exports
+│   └── schema_enforcer.py      # Pydantic schema validation
 ├── sample-data/                 # Sample JSON files for testing
 │   ├── sample-single.json     # Single object format
 │   └── sample-transaction.json # Array format
@@ -430,6 +438,42 @@ The IRSA trust policy correctly matches:
 - `irsa.tf` references `aws_s3_bucket.raw` for S3 policy
 - `irsa.tf` references `aws_db_instance.this` for RDS policy
 - ECR repository and OIDC provider created by Terraform
+
+## Data SRE Approach: Agent Guardrails
+
+This project implements a "Data SRE" approach to prevent "hope-based" prompting by treating AI Agents as "Junior Devs" that cannot be trusted with raw production access. The validation layer acts as a deterministic gate for all Agent outputs.
+
+### Validation Layer (`validation/`)
+
+The `validation/schema_enforcer.py` module provides strict schema validation using Pydantic:
+
+- **Strict JSON Schema**: All Agent outputs must conform to a well-defined `AgentOutputSchema` with required fields (`version`, `records`, `source`)
+- **Schema Drift Detection**: Any deviation from the expected schema raises a `SchemaDriftError`, which is treated as a deployment failure
+- **Deterministic Validation**: No tolerance for schema drift - validation failures block deployment
+- **Type Safety**: Uses Pydantic's type validation to ensure data integrity
+
+**Usage:**
+```python
+from validation import validate_llm_output, SchemaDriftError
+
+try:
+    validated_output = validate_llm_output(raw_llm_string)
+    # Process validated output...
+except SchemaDriftError as e:
+    # Treat as deployment failure - do not proceed
+    raise
+```
+
+### Infrastructure Guardrails (`infrastructure/modules/guardrails`)
+
+The Terraform guardrails module enforces least privilege and human-in-the-loop approval:
+
+- **Least Privilege IAM Role**: Agent role has S3 Read-Only access (`s3:GetObject`, `s3:ListBucket`) with explicit deny for delete operations
+- **No Delete Permissions**: Explicit IAM policy denies all delete operations (`s3:DeleteObject`, `s3:DeleteObjectVersion`)
+- **Manual Approval Gate**: SNS topic configured for human-in-the-loop approval of any Infrastructure-as-Code changes proposed by Agents
+- **Region Restrictions**: IAM role trust policy restricts operations to specific AWS regions
+
+**Key Principle**: Agents operate with minimal permissions and all infrastructure changes require human approval, preventing unauthorized modifications to production systems.
 
 ## Next Steps
 
