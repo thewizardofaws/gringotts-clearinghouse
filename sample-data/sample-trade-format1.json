@@ -1,0 +1,60 @@
+{
+  "version": "1.0",
+  "source": "trade_format_1",
+  "records": [
+    {
+      "id": "trade-001",
+      "timestamp": "2024-12-18T10:00:00Z",
+      "type": "trade",
+      "data": {
+        "TradeDate": "2024-12-18",
+        "Account ID": "ACC-001",
+        "Ticker": "AAPL",
+        "Quantity": 100,
+        "Price": 175.50,
+        "TradeType": "BUY",
+        "Settlement Date": "2024-12-20"
+      },
+      "metadata": {
+        "format": "csv",
+        "source_file": "sample-trade-format1.csv"
+      }
+    },
+    {
+      "id": "trade-002",
+      "timestamp": "2024-12-18T10:05:00Z",
+      "type": "trade",
+      "data": {
+        "TradeDate": "2024-12-18",
+        "Account ID": "ACC-002",
+        "Ticker": "MSFT",
+        "Quantity": 50,
+        "Price": 380.25,
+        "TradeType": "SELL",
+        "Settlement Date": "2024-12-20"
+      },
+      "metadata": {
+        "format": "csv",
+        "source_file": "sample-trade-format1.csv"
+      }
+    },
+    {
+      "id": "trade-003",
+      "timestamp": "2024-12-18T10:10:00Z",
+      "type": "trade",
+      "data": {
+        "TradeDate": "2024-12-18",
+        "Account ID": "ACC-001",
+        "Ticker": "GOOGL",
+        "Quantity": 25,
+        "Price": 142.75,
+        "TradeType": "BUY",
+        "Settlement Date": "2024-12-21"
+      },
+      "metadata": {
+        "format": "csv",
+        "source_file": "sample-trade-format1.csv"
+      }
+    }
+  ]
+}

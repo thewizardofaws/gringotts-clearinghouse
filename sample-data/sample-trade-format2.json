@@ -1,0 +1,57 @@
+{
+  "version": "1.0",
+  "source": "trade_format_2",
+  "records": [
+    {
+      "id": "trade-004",
+      "timestamp": "2024-12-18T11:00:00Z",
+      "type": "trade",
+      "data": {
+        "REPORT_DATE": "2024-12-18",
+        "ACCOUNT_ID": "ACC-003",
+        "SECURITY_TICKER": "TSLA",
+        "SHARES": 75,
+        "MARKET_VALUE": 18750.00,
+        "SOURCE_SYSTEM": "TRADING_SYS_01"
+      },
+      "metadata": {
+        "format": "pipe_delimited",
+        "source_file": "sample-trade-format2.txt"
+      }
+    },
+    {
+      "id": "trade-005",
+      "timestamp": "2024-12-18T11:05:00Z",
+      "type": "trade",
+      "data": {
+        "REPORT_DATE": "2024-12-18",
+        "ACCOUNT_ID": "ACC-004",
+        "SECURITY_TICKER": "NVDA",
+        "SHARES": 30,
+        "MARKET_VALUE": 15900.00,
+        "SOURCE_SYSTEM": "TRADING_SYS_02"
+      },
+      "metadata": {
+        "format": "pipe_delimited",
+        "source_file": "sample-trade-format2.txt"
+      }
+    },
+    {
+      "id": "trade-006",
+      "timestamp": "2024-12-18T11:10:00Z",
+      "type": "trade",
+      "data": {
+        "REPORT_DATE": "2024-12-18",
+        "ACCOUNT_ID": "ACC-003",
+        "SECURITY_TICKER": "AMZN",
+        "SHARES": 40,
+        "MARKET_VALUE": 6120.00,
+        "SOURCE_SYSTEM": "TRADING_SYS_01"
+      },
+      "metadata": {
+        "format": "pipe_delimited",
+        "source_file": "sample-trade-format2.txt"
+      }
+    }
+  ]
+}

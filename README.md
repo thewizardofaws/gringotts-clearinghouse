@@ -155,6 +155,7 @@ kubectl logs -f deployment/clearinghouse-app
 ### Application Features
 
 - **JSON Parsing**: Handles arrays, single objects, and nested structures
+- **Multi-Format Support**: Supports multiple trade file formats (CSV, pipe-delimited) via JSON conversion
 - **Error Handling**: Failed files logged with error messages; processing continues
 - **Deduplication**: Database unique constraint prevents reprocessing. If a file fails mid-process, the database entry remains in `FAILED` state. Deleting the failed entry or manually resetting the status allows the poller to re-attempt ingestion during the next cycle.
 - **Retry Handling**: The application does not automatically retry failed files. Files that fail processing remain in `FAILED` status in the database. To retry a failed file:
@@ -164,6 +165,33 @@ kubectl logs -f deployment/clearinghouse-app
 - **Structured Logging**: Application outputs logs in a standardized format for easy ingestion into CloudWatch or ELK stacks
 - **Health Checks**: `/health` and `/ready` endpoints for monitoring
 - **Pre-flight Checks**: Validates database schema before processing
+
+### Supported Trade File Formats
+
+The clearinghouse supports ingestion of multiple trade file formats. Raw CSV and pipe-delimited files must be converted to JSON format matching the `AgentOutputSchema` before ingestion.
+
+**Trade File Format 1 (CSV):**
+- Fields: `TradeDate`, `Account ID`, `Ticker`, `Quantity`, `Price`, `TradeType`, `Settlement Date`
+- Sample file: `sample-data/sample-trade-format1.csv`
+- JSON representation: `sample-data/sample-trade-format1.json`
+
+**Trade File Format 2 (Pipe-delimited):**
+- Fields: `REPORT_DATE`, `ACCOUNT_ID`, `SECURITY_TICKER`, `SHARES`, `MARKET_VALUE`, `SOURCE_SYSTEM`
+- Sample file: `sample-data/sample-trade-format2.txt`
+- JSON representation: `sample-data/sample-trade-format2.json`
+
+**Validation Requirements:**
+All trade data must be converted to JSON format conforming to the `AgentOutputSchema`:
+- `version`: Schema version string
+- `records`: Array of trade records, each containing:
+  - `id`: Unique identifier
+  - `timestamp`: ISO 8601 timestamp
+  - `type`: Record type (e.g., "trade")
+  - `data`: Trade data fields as key-value pairs
+  - `metadata`: Optional metadata (format, source_file, etc.)
+- `source`: Optional source identifier
+
+The validation layer (`validation/schema_enforcer.py`) enforces strict schema compliance and raises `SchemaDriftError` for any deviations.
 
 ## IAM Permissions
 
@@ -193,6 +221,26 @@ cd tests
 python -m pytest test_json_parsing.py -v
 python -m pytest test_s3_processing.py -v
 ```
+
+### Validation Layer Testing
+
+Test the schema enforcer against multi-format trade data:
+
+```bash
+# Create virtual environment and install dependencies
+python3 -m venv .venv-test
+source .venv-test/bin/activate
+pip install -r validation/requirements.txt
+
+# Run validation tests
+python3 scripts/test-validation.py
+```
+
+This validates both trade file formats:
+- **Trade Format 1 (CSV)**: Validates `sample-trade-format1.json`
+- **Trade Format 2 (Pipe-delimited)**: Validates `sample-trade-format2.json`
+
+The test confirms that both formats conform to the `AgentOutputSchema` without triggering `SchemaDriftError`.
 
 ### Integration Testing
 
@@ -409,13 +457,18 @@ gringotts-clearinghouse/
 ├── validation/                  # Agent output validation
 │   ├── __init__.py             # Module exports
 │   └── schema_enforcer.py      # Pydantic schema validation
-├── sample-data/                 # Sample JSON files for testing
+├── sample-data/                 # Sample files for testing
 │   ├── sample-single.json     # Single object format
-│   └── sample-transaction.json # Array format
+│   ├── sample-transaction.json # Array format
+│   ├── sample-trade-format1.csv # Trade Format 1 (CSV)
+│   ├── sample-trade-format1.json # Trade Format 1 (JSON)
+│   ├── sample-trade-format2.txt # Trade Format 2 (Pipe-delimited)
+│   └── sample-trade-format2.json # Trade Format 2 (JSON)
 ├── scripts/                     # Deployment and utility scripts
 │   ├── build-and-push.sh      # Docker build and ECR push
 │   ├── deploy.sh               # Kubernetes deployment automation
-│   └── upload-sample.sh        # S3 test file upload utility
+│   ├── upload-sample.sh        # S3 test file upload utility
+│   └── test-validation.py      # Validation layer test script
 ├── tests/                       # Unit tests
 │   ├── test_json_parsing.py    # JSON parsing logic tests
 │   ├── test_s3_processing.py   # S3 processing tests
