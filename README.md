@@ -330,6 +330,22 @@ terraform import aws_iam_openid_connect_provider.eks <provider-arn>
 - **Network Security**: Private subnets, security groups, VPC isolation
 - **Resource Limits**: CPU and memory limits defined in deployment
 
+### Security Context Configuration
+
+The deployment uses a two-tier security context approach for optimal security hardening:
+
+**Pod-level Security Context** (`spec.template.spec.securityContext`):
+- `runAsNonRoot: true` - Ensures containers cannot run as root
+- `runAsUser: 1000` - Runs containers as non-privileged user (UID 1000)
+- `fsGroup: 1000` - Sets the filesystem group ownership
+
+**Container-level Security Context** (`spec.template.spec.containers[].securityContext`):
+- `allowPrivilegeEscalation: false` - Prevents privilege escalation
+- `readOnlyRootFilesystem: false` - Allows writes to root filesystem (required for application logs)
+- `capabilities.drop: [ALL]` - Drops all Linux capabilities
+
+This separation ensures strict Kubernetes schema compliance while maintaining comprehensive security hardening at both the pod and container levels.
+
 ## Retry Handling
 
 The application implements a manual retry mechanism for failed file processing:
