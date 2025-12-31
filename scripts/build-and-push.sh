@@ -30,7 +30,8 @@ if [ ! -f "Dockerfile" ]; then
 fi
 
 echo "=== Building Docker image ==="
-if ! docker build -t "${ECR_REPO_NAME}:${IMAGE_TAG}" .; then
+# Build for linux/amd64 platform to match EKS nodes
+if ! docker build --platform linux/amd64 -t "${ECR_REPO_NAME}:${IMAGE_TAG}" .; then
     echo "ERROR: Docker build failed" >&2
     exit 1
 fi
