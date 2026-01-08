@@ -122,3 +122,102 @@ data "aws_region" "current" {}
 # For now, we're using username/password authentication via security groups
 # The RDS IAM policy is included for future use if IAM auth is enabled
 
+########################################
+# AWS Load Balancer Controller IRSA
+########################################
+
+# IAM policy for AWS Load Balancer Controller
+# Uses AWS managed policy for Load Balancer Controller
+data "aws_iam_policy" "aws_load_balancer_controller" {
+  arn = "arn:aws:iam::aws:policy/ElasticLoadBalancingFullAccess"
+}
+
+# Additional EC2 permissions needed by AWS Load Balancer Controller
+data "aws_iam_policy_document" "aws_load_balancer_controller_ec2" {
+  statement {
+    sid    = "AllowEC2ReadActions"
+    effect = "Allow"
+    actions = [
+      "ec2:DescribeAvailabilityZones",
+      "ec2:DescribeVpcs",
+      "ec2:DescribeVpcPeeringConnections",
+      "ec2:DescribeInternetGateways",
+      "ec2:DescribeSecurityGroups",
+      "ec2:DescribeSubnets",
+      "ec2:DescribeTags",
+      "ec2:DescribeInstances"
+    ]
+    resources = ["*"]
+  }
+  
+  statement {
+    sid    = "AllowEC2SecurityGroupActions"
+    effect = "Allow"
+    actions = [
+      "ec2:CreateSecurityGroup",
+      "ec2:AuthorizeSecurityGroupIngress",
+      "ec2:AuthorizeSecurityGroupEgress",
+      "ec2:RevokeSecurityGroupIngress",
+      "ec2:RevokeSecurityGroupEgress",
+      "ec2:DeleteSecurityGroup",
+      "ec2:CreateTags",
+      "ec2:DeleteTags"
+    ]
+    resources = ["*"]
+  }
+}
+
+resource "aws_iam_policy" "aws_load_balancer_controller_ec2" {
+  name        = "${var.project_name}-${var.environment}-aws-load-balancer-controller-ec2-policy"
+  path        = "/interview/"
+  description = "EC2 read permissions for AWS Load Balancer Controller"
+  policy      = data.aws_iam_policy_document.aws_load_balancer_controller_ec2.json
+
+  tags = merge(local.common_tags, {
+    Name = "${var.project_name}-${var.environment}-aws-load-balancer-controller-ec2-policy"
+  })
+}
+
+# IAM role for AWS Load Balancer Controller service account
+data "aws_iam_policy_document" "aws_load_balancer_controller_assume" {
+  statement {
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+    effect  = "Allow"
+    principals {
+      type        = "Federated"
+      identifiers = [aws_iam_openid_connect_provider.eks.arn]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "${replace(aws_iam_openid_connect_provider.eks.url, "https://", "")}:sub"
+      values   = ["system:serviceaccount:kube-system:aws-load-balancer-controller"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "${replace(aws_iam_openid_connect_provider.eks.url, "https://", "")}:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role" "aws_load_balancer_controller" {
+  name                 = "${var.project_name}-${var.environment}-aws-load-balancer-controller-role"
+  path                 = "/interview/"
+  permissions_boundary = "arn:aws:iam::641332413762:policy/InterviewCandidatePolicy"
+  assume_role_policy   = data.aws_iam_policy_document.aws_load_balancer_controller_assume.json
+
+  tags = merge(local.common_tags, {
+    Name = "${var.project_name}-${var.environment}-aws-load-balancer-controller-role"
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "aws_load_balancer_controller" {
+  role       = aws_iam_role.aws_load_balancer_controller.name
+  policy_arn = data.aws_iam_policy.aws_load_balancer_controller.arn
+}
+
+resource "aws_iam_role_policy_attachment" "aws_load_balancer_controller_ec2" {
+  role       = aws_iam_role.aws_load_balancer_controller.name
+  policy_arn = aws_iam_policy.aws_load_balancer_controller_ec2.arn
+}
+

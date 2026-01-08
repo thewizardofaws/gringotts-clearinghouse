@@ -6,9 +6,9 @@ A production-ready data ingestion pipeline that monitors an S3 bucket for JSON a
 
 ### Components
 
-- **Infrastructure (Terraform)**: VPC, EKS cluster (v1.34+), AL2023 Managed Node Groups via NodeConfig API, RDS PostgreSQL, S3 bucket, ECR repository, IRSA configuration
-- **Application (Python)**: S3 bucket watcher, JSON parser, database ingestion engine
-- **Kubernetes**: Deployment, service, service account with IRSA, database schema initialization
+- **Infrastructure (Terraform)**: VPC, EKS cluster (v1.34+), AL2023 Managed Node Groups via NodeConfig API, RDS PostgreSQL, S3 bucket, ECR repository, IRSA configuration, AWS Load Balancer Controller IRSA setup
+- **Application (Python)**: S3 bucket watcher, JSON/CSV parser, database ingestion engine, Flask health check endpoints
+- **Kubernetes**: Deployment, service, service account with IRSA, database schema initialization, Ingress with internet-facing ALB
 
 **Note**: This implementation uses the latest EKS standards including Amazon Linux 2023 (AL2023) Managed Node Groups with the NodeConfig API (`node.eks.aws/v1alpha1`), ensuring compatibility with EKS v1.34+ and modern node bootstrap requirements.
 
@@ -116,7 +116,56 @@ kubectl apply -f k8s/deployment.yaml
 kubectl apply -f k8s/service.yaml
 ```
 
-### 4. Verify Deployment
+### 4. Install AWS Load Balancer Controller
+
+The AWS Load Balancer Controller is required for managing ALB resources. Since Kubernetes 1.34 doesn't support the controller addon, it must be installed via Helm or kubectl manifests.
+
+**Prerequisites:**
+- Terraform must be applied to create the Load Balancer Controller IAM role
+- OIDC provider must be configured (done by Terraform)
+
+**Installation:**
+```bash
+# 1. Create service account with IRSA annotation
+cd infrastructure/us-west-2/dev
+ROLE_ARN=$(terraform output -raw aws_load_balancer_controller_role_arn)
+cat <<EOF | kubectl apply -f-
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: aws-load-balancer-controller
+  namespace: kube-system
+  annotations:
+    eks.amazonaws.com/role-arn: ${ROLE_ARN}
+EOF
+
+# 2. Install CRDs
+kubectl apply --server-side -f https://github.com/kubernetes-sigs/aws-load-balancer-controller/releases/download/v2.9.0/v2_9_0_full.yaml
+
+# 3. Create IngressClass
+cd ../..
+kubectl apply -f k8s/ingressclass.yaml
+
+# 4. Verify controller is running
+kubectl get pods -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controller
+```
+
+**Note:** The controller will automatically be configured with the correct cluster name and IRSA role.
+
+### 5. Deploy Ingress (ALB)
+
+```bash
+# Deploy Ingress to create internet-facing ALB
+kubectl apply -f k8s/ingress.yaml
+
+# Wait for ALB provisioning (typically 1-2 minutes)
+kubectl get ingress clearinghouse-app-ingress
+
+# Get ALB DNS name
+kubectl get ingress clearinghouse-app-ingress -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
+```
+
+### 6. Verify Deployment
 
 ```bash
 # Check pod status
@@ -127,6 +176,9 @@ kubectl logs -f deployment/clearinghouse-app
 
 # Check service
 kubectl get svc clearinghouse-app
+
+# Check ingress and ALB
+kubectl get ingress clearinghouse-app-ingress
 ```
 
 ### 5. Test End-to-End
@@ -274,6 +326,7 @@ kubectl logs -f deployment/clearinghouse-app
 
 ### Health Checks
 
+**Via Port Forward (Internal):**
 ```bash
 # Health endpoint
 kubectl port-forward deployment/clearinghouse-app 8080:8080
@@ -282,6 +335,26 @@ curl http://localhost:8080/health
 # Readiness endpoint
 curl http://localhost:8080/ready
 ```
+
+**Via Internet-Facing ALB (External):**
+The application is exposed via an Application Load Balancer (ALB) for external access.
+
+```bash
+# Get ALB DNS name
+ALB_DNS=$(kubectl get ingress clearinghouse-app-ingress -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+
+# Health endpoint
+curl http://${ALB_DNS}/health
+
+# Readiness endpoint
+curl http://${ALB_DNS}/ready
+```
+
+The ALB provides:
+- Internet-facing access to the Flask application
+- Health checks configured to use `/health` endpoint
+- Automatic traffic distribution across pod replicas
+- HTTPS support (can be configured with SSL certificates)
 
 ### Database Status
 
@@ -497,9 +570,11 @@ gringotts-clearinghouse/
 ├── k8s/                         # Kubernetes manifests
 │   ├── db-secret.yaml          # Database credentials secret
 │   ├── deployment.yaml         # Application deployment
+│   ├── ingress.yaml            # Ingress with internet-facing ALB
+│   ├── ingressclass.yaml       # IngressClass for AWS Load Balancer Controller
 │   ├── schema-init-job.yaml    # Database schema initialization
 │   ├── service-account.yaml    # IRSA service account
-│   └── service.yaml            # Kubernetes service
+│   └── service.yaml            # Kubernetes service (ClusterIP)
 ├── validation/                  # Agent output validation
 │   ├── __init__.py             # Module exports
 │   └── schema_enforcer.py      # Pydantic schema validation
@@ -526,7 +601,7 @@ gringotts-clearinghouse/
 **File Counts:**
 - Application Code: 2 files
 - Infrastructure: 8 Terraform files
-- Kubernetes: 5 manifest files
+- Kubernetes: 7 manifest files (including Ingress and IngressClass)
 - Scripts: 3 deployment/utility scripts
 - Tests: 4 test files
 
