@@ -8,6 +8,9 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y \
     gcc \
     postgresql-client \
+    curl \
+    jq \
+    vim \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for better layer caching

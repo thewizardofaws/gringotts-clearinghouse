@@ -362,6 +362,45 @@ kubectl run db-status --rm -it --image=postgres:15-alpine --restart=Never -- \
      -U appuser -d clearinghouse -c "SELECT 1;"'
    ```
 
+### Container Troubleshooting Tools
+
+The application container includes troubleshooting utilities for debugging within pods:
+
+**Available Tools:**
+- `curl` - HTTP client for testing endpoints and API calls
+- `postgresql-client` - PostgreSQL client for direct database queries
+- `jq` - JSON processor for parsing and manipulating JSON data
+- `vim` - Text editor for viewing and editing configuration files
+
+**Usage Examples:**
+
+1. **Exec into a running pod:**
+   ```bash
+   kubectl exec -it deployment/clearinghouse-app -- /bin/bash
+   ```
+
+2. **Test health endpoint from within pod:**
+   ```bash
+   curl http://localhost:8080/health
+   curl http://localhost:8080/ready
+   ```
+
+3. **Query database directly:**
+   ```bash
+   psql -h $DB_HOST -U $DB_USER -d $DB_NAME -c "SELECT * FROM file_processing_log ORDER BY created_at DESC LIMIT 5;"
+   ```
+
+4. **Parse JSON responses:**
+   ```bash
+   curl -s http://localhost:8080/health | jq .
+   ```
+
+5. **View and edit files:**
+   ```bash
+   vim /app/app/app.py
+   cat /app/app/requirements.txt
+   ```
+
 ### OIDC Provider Already Exists
 
 If Terraform reports the OIDC provider already exists:
