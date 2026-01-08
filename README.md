@@ -1,6 +1,6 @@
 # Data Clearinghouse
 
-A production-ready data ingestion pipeline that monitors an S3 bucket for JSON files, processes them, and stores structured data in PostgreSQL. Built for AWS EKS with IRSA (IAM Roles for Service Accounts) for secure, credential-free S3 access.
+A production-ready data ingestion pipeline that monitors an S3 bucket for JSON and CSV files, processes them, and stores structured data in PostgreSQL. Built for AWS EKS with IRSA (IAM Roles for Service Accounts) for secure, credential-free S3 access.
 
 ## Architecture
 
@@ -14,12 +14,14 @@ A production-ready data ingestion pipeline that monitors an S3 bucket for JSON f
 
 ### Data Flow
 
-1. **S3 Monitoring**: Application polls the target S3 bucket every 30 seconds (configurable) for new `.json` files
+1. **S3 Monitoring**: Application polls the target S3 bucket every 30 seconds (configurable) for new `.json` and `.csv` files
 2. **File Processing**: When a new file is detected:
    - Downloads file from S3
    - Calculates SHA256 hash for deduplication
    - Logs processing start in `file_processing_log` table
-   - Parses JSON content (supports arrays, single objects, nested structures)
+   - Parses file content based on extension:
+     - **JSON**: Supports arrays, single objects, and nested structures
+     - **CSV**: Uses `csv.DictReader` to map headers to dictionary keys
    - Upserts records into `processed_data` table
    - Updates log status to `COMPLETED` or `FAILED`
 
@@ -155,7 +157,11 @@ kubectl logs -f deployment/clearinghouse-app
 ### Application Features
 
 - **JSON Parsing**: Handles arrays, single objects, and nested structures
-- **Multi-Format Support**: Supports multiple trade file formats (CSV, pipe-delimited) via JSON conversion
+- **CSV Parsing**: Native CSV support using `csv.DictReader` to automatically map headers to dictionary keys. CSV rows are converted to records with:
+  - `type` field (defaults to 'trade', can be overridden by CSV data)
+  - `data` field containing the CSV row as a dictionary
+  - `metadata` field with format, source file, and row number
+- **Multi-Format Support**: Supports JSON and CSV files natively. Pipe-delimited and other formats can be converted to JSON for ingestion
 - **Error Handling**: Failed files logged with error messages; processing continues
 - **Deduplication**: Database unique constraint prevents reprocessing. If a file fails mid-process, the database entry remains in `FAILED` state. Deleting the failed entry or manually resetting the status allows the poller to re-attempt ingestion during the next cycle.
 - **Retry Handling**: The application does not automatically retry failed files. Files that fail processing remain in `FAILED` status in the database. To retry a failed file:
@@ -168,12 +174,13 @@ kubectl logs -f deployment/clearinghouse-app
 
 ### Supported Trade File Formats
 
-The clearinghouse supports ingestion of multiple trade file formats. Raw CSV and pipe-delimited files must be converted to JSON format matching the `AgentOutputSchema` before ingestion.
+The clearinghouse supports native ingestion of JSON and CSV files. CSV files are automatically parsed using `csv.DictReader`, with headers mapped to dictionary keys. Pipe-delimited and other formats can be converted to JSON for ingestion.
 
 **Trade File Format 1 (CSV):**
 - Fields: `TradeDate`, `Account ID`, `Ticker`, `Quantity`, `Price`, `TradeType`, `Settlement Date`
 - Sample file: `sample-data/sample-trade-format1.csv`
-- JSON representation: `sample-data/sample-trade-format1.json`
+- **Native Support**: CSV files can be uploaded directly to S3 and will be automatically processed
+- JSON representation: `sample-data/sample-trade-format1.json` (for validation layer reference)
 
 **Trade File Format 2 (Pipe-delimited):**
 - Fields: `REPORT_DATE`, `ACCOUNT_ID`, `SECURITY_TICKER`, `SHARES`, `MARKET_VALUE`, `SOURCE_SYSTEM`

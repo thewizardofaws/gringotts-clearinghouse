@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
 """
 Data Clearinghouse Application
-Watches S3 bucket for new files, processes JSON data, and stores in PostgreSQL
+Watches S3 bucket for new files, processes JSON and CSV data, and stores in PostgreSQL
 """
 
 import os
 import json
+import csv
 import hashlib
 import logging
 import time
 from datetime import datetime
+from io import StringIO
 from typing import Dict, Any, Optional
 import boto3
 import psycopg2
@@ -211,6 +213,75 @@ def process_json_file(s3_key: str, content: bytes) -> list[Dict[str, Any]]:
         raise ValueError(f"Error parsing {s3_key}: {str(e)}")
 
 
+def process_csv_file(s3_key: str, content: bytes) -> list[Dict[str, Any]]:
+    """
+    Parse CSV file and extract records for database ingestion.
+    Uses csv.DictReader to map CSV headers to dictionary keys.
+    
+    Args:
+        s3_key: S3 object key for logging purposes
+        content: Raw file content as bytes
+        
+    Returns:
+        List of record dictionaries to be inserted into processed_data table.
+        Each record contains the CSV row data with a 'type' field set to 'trade'
+        and metadata about the source file.
+        
+    Raises:
+        ValueError: If CSV is malformed, empty, or has unexpected structure
+    """
+    if not content or len(content) == 0:
+        raise ValueError(f"Empty file: {s3_key}")
+    
+    try:
+        decoded_content = content.decode('utf-8').strip()
+        if not decoded_content:
+            raise ValueError(f"File contains only whitespace: {s3_key}")
+        
+        # Parse CSV using DictReader to automatically map headers to keys
+        csv_reader = csv.DictReader(StringIO(decoded_content))
+        records = []
+        file_name = os.path.basename(s3_key)
+        
+        for row_num, row in enumerate(csv_reader, start=2):  # Start at 2 (row 1 is header)
+            # Skip empty rows
+            if not any(row.values()):
+                continue
+            
+            # Create record structure matching expected format
+            # Include type field for record_type extraction in upsert_processed_data
+            record = {
+                'type': 'trade',  # Default type, can be overridden if CSV has type column
+                'data': dict(row),  # CSV row data as dictionary
+                'metadata': {
+                    'format': 'csv',
+                    'source_file': file_name,
+                    'row_number': row_num
+                }
+            }
+            
+            # If CSV has a 'type' column, use it instead of default
+            if 'type' in row and row['type']:
+                record['type'] = row['type']
+            elif 'TradeType' in row and row['TradeType']:
+                # Map TradeType to type if present
+                record['type'] = row['TradeType'].lower()
+            
+            records.append(record)
+        
+        if not records:
+            raise ValueError(f"No records extracted from {s3_key} (file may contain only headers or empty rows)")
+        
+        logger.info(f"Parsed {len(records)} records from {s3_key}")
+        return records
+    except csv.Error as e:
+        raise ValueError(f"Invalid CSV format in {s3_key}: {str(e)}")
+    except UnicodeDecodeError as e:
+        raise ValueError(f"Invalid UTF-8 encoding in {s3_key}: {str(e)}")
+    except Exception as e:
+        raise ValueError(f"Error parsing {s3_key}: {str(e)}")
+
+
 def process_s3_file(s3_key: str) -> bool:
     """
     Process a single S3 file: download, parse, and store in database
@@ -249,8 +320,13 @@ def process_s3_file(s3_key: str) -> bool:
             metadata
         )
         
-        # Parse JSON file
-        records = process_json_file(s3_key, content)
+        # Parse file based on extension
+        if s3_key.endswith('.json'):
+            records = process_json_file(s3_key, content)
+        elif s3_key.endswith('.csv'):
+            records = process_csv_file(s3_key, content)
+        else:
+            raise ValueError(f"Unsupported file type: {s3_key}. Supported formats: .json, .csv")
         
         # Upsert processed data
         upsert_processed_data(conn, file_log_id, records)
@@ -315,15 +391,17 @@ def watch_s3_bucket():
                 time.sleep(POLL_INTERVAL)
                 continue
             
-            # Filter for JSON files that haven't been processed
+            # Filter for JSON and CSV files that haven't been processed
             new_files = [
                 obj['Key']
                 for obj in response['Contents']
-                if obj['Key'].endswith('.json') and obj['Key'] not in processed_files
+                if obj['Key'].endswith(('.json', '.csv')) and obj['Key'] not in processed_files
             ]
             
             if new_files:
-                logger.info(f"Found {len(new_files)} new JSON file(s) to process")
+                json_count = sum(1 for f in new_files if f.endswith('.json'))
+                csv_count = sum(1 for f in new_files if f.endswith('.csv'))
+                logger.info(f"Found {len(new_files)} new file(s) to process ({json_count} JSON, {csv_count} CSV)")
                 
                 # Process each new file
                 for s3_key in new_files:
