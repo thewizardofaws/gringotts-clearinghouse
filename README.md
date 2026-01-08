@@ -224,6 +224,143 @@ kubectl logs -f deployment/clearinghouse-app
 - **Health Checks**: `/health` and `/ready` endpoints for monitoring
 - **Pre-flight Checks**: Validates database schema before processing
 
+## Data Ingestion Specification
+
+The clearinghouse natively supports JSON and CSV file formats. Files are automatically detected by extension (`.json` or `.csv`) and processed accordingly.
+
+### JSON Format
+
+The ingestion logic (`process_json_file()`) accepts flexible JSON structures:
+
+**Format 1: Array of Records**
+```json
+[
+  {
+    "type": "trade",
+    "data": {
+      "TradeDate": "2024-12-18",
+      "Account ID": "ACC-001",
+      "Ticker": "AAPL",
+      "Quantity": 100,
+      "Price": 175.50,
+      "TradeType": "BUY",
+      "Settlement Date": "2024-12-20"
+    },
+    "metadata": {
+      "source": "format1"
+    }
+  },
+  {
+    "type": "trade",
+    "data": {
+      "TradeDate": "2024-12-18",
+      "Account ID": "ACC-002",
+      "Ticker": "MSFT",
+      "Quantity": 50,
+      "Price": 380.25,
+      "TradeType": "SELL",
+      "Settlement Date": "2024-12-20"
+    }
+  }
+]
+```
+
+**Format 2: Single Object**
+```json
+{
+  "type": "trade",
+  "data": {
+    "TradeDate": "2024-12-18",
+    "Account ID": "ACC-001",
+    "Ticker": "AAPL",
+    "Quantity": 100,
+    "Price": 175.50
+  }
+}
+```
+
+**Format 3: Object with Nested Records Array**
+```json
+{
+  "records": [
+    {
+      "type": "trade",
+      "data": {
+        "TradeDate": "2024-12-18",
+        "Account ID": "ACC-001",
+        "Ticker": "AAPL",
+        "Quantity": 100
+      }
+    }
+  ]
+}
+```
+
+**Format 4: Object with Nested Data Array**
+```json
+{
+  "data": [
+    {
+      "type": "trade",
+      "TradeDate": "2024-12-18",
+      "Account ID": "ACC-001",
+      "Ticker": "AAPL"
+    }
+  ]
+}
+```
+
+**Notes:**
+- Records are stored as-is in the `processed_data.record_data` JSONB field
+- The `type` field (if present) is extracted for the `record_type` column
+- All JSON structures are accepted without strict schema validation during ingestion
+- Empty arrays or objects will raise a `ValueError`
+
+### CSV Format
+
+CSV files are parsed using Python's `csv.DictReader`, which automatically maps headers to dictionary keys.
+
+**CSV Structure:**
+```csv
+TradeDate,Account ID,Ticker,Quantity,Price,TradeType,Settlement Date
+2024-12-18,ACC-001,AAPL,100,175.50,BUY,2024-12-20
+2024-12-18,ACC-002,MSFT,50,380.25,SELL,2024-12-20
+```
+
+**Processing Logic:**
+- First row must contain column headers
+- Each subsequent row becomes a record
+- Empty rows are automatically skipped
+- CSV rows are converted to the following structure:
+  ```json
+  {
+    "type": "trade",
+    "data": {
+      "TradeDate": "2024-12-18",
+      "Account ID": "ACC-001",
+      "Ticker": "AAPL",
+      "Quantity": "100",
+      "Price": "175.50",
+      "TradeType": "BUY",
+      "Settlement Date": "2024-12-20"
+    },
+    "metadata": {
+      "format": "csv",
+      "source_file": "sample-trade-format1.csv",
+      "row_number": 2
+    }
+  }
+  ```
+
+**Type Field Mapping:**
+- Default `type` is set to `"trade"`
+- If CSV contains a `type` column, its value is used
+- If CSV contains a `TradeType` column, it's mapped to `type` (lowercased)
+
+**Sample Files:**
+- `sample-data/sample-trade-format1.csv` - Trade Format 1 (CSV)
+- `sample-data/sample-trade-format1.json` - Trade Format 1 (JSON representation)
+
 ### Supported Trade File Formats
 
 The clearinghouse supports native ingestion of JSON and CSV files. CSV files are automatically parsed using `csv.DictReader`, with headers mapped to dictionary keys. Pipe-delimited and other formats can be converted to JSON for ingestion.
@@ -239,8 +376,8 @@ The clearinghouse supports native ingestion of JSON and CSV files. CSV files are
 - Sample file: `sample-data/sample-trade-format2.txt`
 - JSON representation: `sample-data/sample-trade-format2.json`
 
-**Validation Requirements:**
-All trade data must be converted to JSON format conforming to the `AgentOutputSchema`:
+**Validation Requirements (for Validation Layer):**
+The validation layer (`validation/schema_enforcer.py`) enforces strict schema compliance using `AgentOutputSchema`:
 - `version`: Schema version string
 - `records`: Array of trade records, each containing:
   - `id`: Unique identifier
@@ -250,7 +387,7 @@ All trade data must be converted to JSON format conforming to the `AgentOutputSc
   - `metadata`: Optional metadata (format, source_file, etc.)
 - `source`: Optional source identifier
 
-The validation layer (`validation/schema_enforcer.py`) enforces strict schema compliance and raises `SchemaDriftError` for any deviations.
+**Note:** The validation layer is separate from the ingestion logic. Ingestion accepts flexible JSON structures as documented above, while the validation layer enforces strict schema compliance for agent outputs.
 
 ## IAM Permissions
 
